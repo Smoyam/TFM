@@ -1,0 +1,5 @@
+Comando para comprobar a que puerto se ha conectado la placa Arduino
+dmesg | grep "tty"
+
+Comando para compilar el codigo
+g++ -o code codigoEditado.cpp -lwiringPi -pthread -lrt
