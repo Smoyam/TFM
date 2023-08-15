@@ -12,7 +12,7 @@
 #include <wiringSerial.h>
 
 //Para implementar el control LQRI se varía la cuarta componente del vector K a 0.3
-float K[] = {-350.22,-47.23};
+float K[] = {20.95105,1.59502};
 float offset = 3.5;
 
 //FUNCIONES
@@ -26,10 +26,17 @@ int cont;
 //VARIABLES PARA COMUNICAR CON ARDUINO
 float omega, omega_r;
 float alpha;
+uint16_t alphaByte;
 int fd;
 
 int gx;
+float gxRad;
 float ang;
+
+float gxFiltro;
+float angFiltro;
+
+float alfa = 1;
 
 struct miEstructura {
     uint16_t angByte = 0;
@@ -78,12 +85,14 @@ void Manejador(int signo, siginfo_t *info, void*context) {
     //CADA VEZ QUE SE ACTIVA LA SENAL, CICLO AUMENTA EN UNA UNIDAD Y HACE QUE LE CORRESPONDA EN EL SWITCH-CASE
     switch(ciclo) {
         case 1:
-            alpha=calculo_lqr(omega,omega_r);
+            alpha = calculo_lqr(angFiltro,gxFiltro);
             //std::cout << alpha << std::endl;
         break;
 
         case 2:
-            serialPutchar(fd, alpha);
+            for (int i = 0; i < 4; i++) {
+                serialPutchar(fd, *((char *)&alpha + i));
+            }
         break;
         
         case 3:
@@ -96,8 +105,12 @@ void Manejador(int signo, siginfo_t *info, void*context) {
             memcpy(&datos, buffer, sizeof(miEstructura));
             
             gx = uint2int(datos.gxByte);
-            ang = uint2float(datos.angByte);
-            std::cout << ang << std::endl;
+            gxRad = (float)gx*DEG_TO_RAD;
+            ang = uint2float(datos.angByte)*DEG_TO_RAD;
+            
+            gxFiltro = gxRad*alfa + gxFiltro*(1-alfa);
+            angFiltro = ang*alfa + angFiltro*(1-alfa);
+            std::cout << angFiltro << "  " << gxFiltro << "  " << alpha << std::endl;
             
             ciclo = 0;
         break;
@@ -106,7 +119,6 @@ void Manejador(int signo, siginfo_t *info, void*context) {
 
 //FUNCIÓN PRINCIPAL MAIN
 int main(void) {
-    while (true) {
     //CODIGO DE CONEXION CON ARDUINO	
 	// Abrir comunicacion serial
 	fd = serialOpen("/dev/ttyUSB0", 115200);
@@ -115,6 +127,8 @@ int main(void) {
 		std::cerr << "Error al abrir puerto serie" << std::endl;
 		return 1;
 	}
+    while (true) {
+    
     
     //TRATAMIENTO DE SENALES
     sigemptyset(&sign); //crea una mascara vacía
