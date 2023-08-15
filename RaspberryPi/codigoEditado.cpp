@@ -10,6 +10,9 @@
 #include <iostream>
 #include <wiringPi.h>
 #include <wiringSerial.h>
+#include <chrono>
+
+using namespace std::chrono;
 
 //Para implementar el control LQRI se varía la cuarta componente del vector K a 0.3
 float K[] = {20.95105,1.59502};
@@ -33,15 +36,17 @@ int gx;
 float gxRad;
 float ang;
 
-float gxFiltro;
-float angFiltro;
+float gxAnterior;
+float angAnterior;
 
-float alfa = 1;
+float alfa = 0.15;
 
+#pragma pack(push, 1)
 struct miEstructura {
     uint16_t angByte = 0;
     uint16_t gxByte = 0;
 };
+#pragma pack(pop)
 
 //VARIABLES PARA CONTROL LQR
 float ivr = 0, u;
@@ -79,13 +84,17 @@ float uint2float(uint16_t valor) {
 	return salida;
 }
 
+auto start = 0;
+auto stop = 0;
+auto duration = 0;
+
 //FUNCIÓN MANEJADOR
 void Manejador(int signo, siginfo_t *info, void*context) {
     ciclo++;
     //CADA VEZ QUE SE ACTIVA LA SENAL, CICLO AUMENTA EN UNA UNIDAD Y HACE QUE LE CORRESPONDA EN EL SWITCH-CASE
     switch(ciclo) {
         case 1:
-            alpha = calculo_lqr(angFiltro,gxFiltro);
+            alpha = calculo_lqr(ang,gxRad);
             //std::cout << alpha << std::endl;
         break;
 
@@ -95,7 +104,7 @@ void Manejador(int signo, siginfo_t *info, void*context) {
             }
         break;
         
-        case 3:
+        case 3:        
             unsigned char buffer[sizeof(miEstructura)];
             for (int i = 0; i < sizeof(miEstructura); i++) {
                 buffer[i] = serialGetchar(fd);
@@ -108,9 +117,12 @@ void Manejador(int signo, siginfo_t *info, void*context) {
             gxRad = (float)gx*DEG_TO_RAD;
             ang = uint2float(datos.angByte)*DEG_TO_RAD;
             
-            gxFiltro = gxRad*alfa + gxFiltro*(1-alfa);
-            angFiltro = ang*alfa + angFiltro*(1-alfa);
-            std::cout << angFiltro << "  " << gxFiltro << "  " << alpha << std::endl;
+            gxRad = gxRad*alfa + gxAnterior*(1-alfa);
+            ang = ang*alfa + angAnterior*(1-alfa);
+            std::cout << ang << "  " << gxRad << "  " << alpha << std::endl;
+            
+            gxAnterior = gxRad;
+            angAnterior = ang;            
             
             ciclo = 0;
         break;
@@ -127,15 +139,12 @@ int main(void) {
 		std::cerr << "Error al abrir puerto serie" << std::endl;
 		return 1;
 	}
-    while (true) {
-    
-    
     //TRATAMIENTO DE SENALES
     sigemptyset(&sign); //crea una mascara vacía
     sigaddset(&sign, SIGUSR1); //anade la senal SIGALARM al conjunto
     pthread_sigmask(SIG_UNBLOCK,&sign, NULL); //bloqueo la senal para el proceso
     /* programo la senar SIGVTALRM para que salte la funcion manejador
-    cuando se cumpla el temporizador */    
+    cuando se cumpla el temporizador */
     act.sa_sigaction=Manejador;
     sigemptyset(&(act.sa_mask));
     act.sa_flags=SA_SIGINFO;
@@ -152,9 +161,8 @@ int main(void) {
 
     //inicio el temporizador
     timer_settime(&temporizador, TIMER_ABSTIME, &periodo , NULL);
-    //while(1){}
-    //exit(0);
-    }
+    while(1){}
+    exit(0);
 }
 
 //función que calcula la acción de control
