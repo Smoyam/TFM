@@ -39,12 +39,12 @@ float ang;
 float gxAnterior;
 float angAnterior;
 
-float alfa = 0.15;
+//float alfa = 0.15;
 
 #pragma pack(push, 1)
 struct miEstructura {
     uint16_t angByte = 0;
-    uint16_t gxByte = 0;
+    //uint16_t gxByte = 0;
 };
 #pragma pack(pop)
 
@@ -113,13 +113,12 @@ void Manejador(int signo, siginfo_t *info, void*context) {
             miEstructura datos;
             memcpy(&datos, buffer, sizeof(miEstructura));
             
-            gx = uint2int(datos.gxByte);
-            gxRad = (float)gx*DEG_TO_RAD;
-            ang = uint2float(datos.angByte)*DEG_TO_RAD;
+            //gx = uint2int(datos.gxByte);
+            ang = uint2float(datos.angByte);
             
-            gxRad = gxRad*alfa + gxAnterior*(1-alfa);
-            ang = ang*alfa + angAnterior*(1-alfa);
-            std::cout << ang << "  " << gxRad << "  " << alpha << std::endl;
+            //gxRad = gxRad*alfa + gxAnterior*(1-alfa);
+            //ang = ang*alfa + angAnterior*(1-alfa);
+            std::cout << ang << "  " << gx << "  " << alpha << std::endl;
             
             gxAnterior = gxRad;
             angAnterior = ang;            
@@ -132,13 +131,13 @@ void Manejador(int signo, siginfo_t *info, void*context) {
 //FUNCIÓN PRINCIPAL MAIN
 int main(void) {
     //CODIGO DE CONEXION CON ARDUINO	
-	// Abrir comunicacion serial
-	fd = serialOpen("/dev/ttyUSB0", 115200);
+    // Abrir comunicacion serial
+    fd = serialOpen("/dev/ttyUSB0", 115200);
 	
-	if (fd < 0) {
-		std::cerr << "Error al abrir puerto serie" << std::endl;
-		return 1;
-	}
+    if (fd < 0) {
+	std::cerr << "Error al abrir puerto serie" << std::endl;
+	return 1;
+    }
     //TRATAMIENTO DE SENALES
     sigemptyset(&sign); //crea una mascara vacía
     sigaddset(&sign, SIGUSR1); //anade la senal SIGALARM al conjunto
