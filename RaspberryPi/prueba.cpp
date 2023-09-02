@@ -1,5 +1,5 @@
 // dmesg | grep "tty"
-// g++ -o code codigoEditado.cpp -lwiringPi -pthread -lrt
+// g++ -o code prueba.cpp -lwiringPi -pthread -lrt
 // sudo rm /var/run/pigpio.pid
 // sudo netstat -tuln | grep 8888
 
@@ -15,8 +15,7 @@
 using namespace std::chrono;
 
 //Para implementar el control LQRI se varía la cuarta componente del vector K a 0.3
-float K[] = {20.95105,1.59502};
-float offset = 3.5;
+float K[] = {169.5105,20.9502};
 
 //FUNCIONES
 float calculo_lqr(float A, float B);
@@ -119,12 +118,15 @@ void Manejador(int signo, siginfo_t *info, void*context) {
             gx = uint2int(datos.gxByte);
             ang = uint2float(datos.angByte);
             
+            ang = ang*DEG_TO_RAD;
+            gxRad = (float)gx*DEG_TO_RAD;
+            
             //gxRad = gxRad*alfa + gxAnterior*(1-alfa);
             //ang = ang*alfa + angAnterior*(1-alfa);
-            std::cout << ang << "  " << gx << "  " << alpha << std::endl;
+            std::cout << ang << "  " << gxRad << "  " << alpha << std::endl;
             
-            gxAnterior = gxRad;
-            angAnterior = ang;            
+            //gxAnterior = gxRad;
+            //angAnterior = ang;            
             
             ciclo = 0;
         break;
