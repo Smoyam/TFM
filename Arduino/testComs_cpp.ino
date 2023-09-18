@@ -14,26 +14,26 @@ float T_PULS_2=0.0000159375*PREESCALA_2; //T=(1/16000000)∗255∗Escala
 #define SETTT(x, y, z, v) (x|=(1<<y)|(1<<z) |(1<<v) )
 
 // VARIABLES GLOBALES
-float alfa =0; // VARIABLE QUE ALMACENA LA ACELERACIÓN QUE RECIBE DE LA RPI
-float vec[2]={0,0}; // VECTOR QUE ALMACENA LOS VALORES DE LA VELOCIDAD
+volatile float alfa =0; // VARIABLE QUE ALMACENA LA ACELERACIÓN QUE RECIBE DE LA RPI
+volatile float vec[2]={0,0}; // VECTOR QUE ALMACENA LOS VALORES DE LA VELOCIDAD
 float alfa_M1=0; // VARIABLE QUE ALMACENA LA ACELERACIÓN A APLICAR, DESPUÉS DE FILTRAR SI ESTA ENTRE LOS LIMITES ESTABLECIDOS EN +− xx RAD/S^2. EVITANDO ASI EL OVF AL ENVIARSE UN DATO CORRUPTO
 float flag =0; // BANDERA QUE SE PONE A CERO CUANDO SE RECIBE UN DATO alfa DESDE LA RPI, UNA VEZ PROCESADO ESTE DATO SE PONE A UNO A LA ESPERA DE RECIBIR OTRO DATO
 int comprueba;
-int j=0;
+int j = 0;
 float vel; // VALOR DE LA VELOCIDAD MEDIA QUE LE ENVÍO A LA PI
 float vel_M1, vel_M2;
 
 // DECLARACION PINES MOTOR 1
-#define STEP_MOTOR_1 1 // PORTD 9
-#define DIR_MOTOR_1 0 // PORTD 8
-int MS1_MOTOR_1 = 8 - 8; //PORTC 1
-int MS2_MOTOR_1 = 9 - 8; // PORTC 2
+#define STEP_MOTOR_1 1 // PORTB D9
+#define DIR_MOTOR_1 0 // PORTB D8
+int MS1_MOTOR_1 = 8 - 8; //PORTC A0
+int MS2_MOTOR_1 = 9 - 8; // PORTC A1
 
 // DECLARACION PINES MOTOR 2
-#define STEP_MOTOR_2 6 // PORTD 7
-#define DIR_MOTOR_2 7 // PORTD 6
-int MS1_MOTOR_2 = 11 - 8; // PORTD 3
-int MS2_MOTOR_2 = 12 - 8; // PORTD 4
+#define STEP_MOTOR_2 6 // PORTD D7
+#define DIR_MOTOR_2 7 // PORTD D6
+int MS1_MOTOR_2 = 11 - 8; // PORTD D3
+int MS2_MOTOR_2 = 12 - 8; // PORTD D4
 
 // DECLARACIÓN DE LA CANTIDAD DE PASOS POR REVOLUCIÓN DEPENDIENDO DE LA CONFIGURACIÓN
 uint16_t npuls_min[]={700, 600, 600, 600};
@@ -80,14 +80,18 @@ MPU6050 sensor;
 // Valores RAW (sin procesar) del acelerometro  en los ejes x,y,z
 int ax, ay, az;
 int gx, gy, gz;
-int gxAnterior = 0;
 
-// Angulo de giro del Segway
-float angulo = 0;
-float anguloAnterior = 0;
+float TAU = 0.99;
+
+float phi, dphi;
 
 long tiempo_prev;
 float dt;
+float ang_x, ang_y;
+float ang_x_prev, ang_y_prev;
+
+// angulo
+float angulo = 0;
 
 // Aceleracion de las ruedas
 float aceleracion = 0;
@@ -99,6 +103,13 @@ struct miEstructura {
   uint16_t gxByte;
 };
 #pragma pack(pop)
+
+uint16_t vec1Byte;
+uint16_t vec2Byte;
+
+static miEstructura datos;
+
+#define M_PI 3.1416
 
 void setup() {
   Serial.begin(115200);
@@ -179,17 +190,36 @@ void setup() {
 }
 
 void loop() {
+  j++;
+  
   // Envío de datos
-  static miEstructura datos;
-  datos.angByte = float2int(angulo);
-  datos.gxByte = (uint16_t)gx;
+  if (j == 1) {
+    datos.angByte = float2int(ang_y);
+    datos.gxByte = (uint16_t)gy;
 
-  byte* tx = (byte*)&datos;
-  for (int i = 0; i < sizeof(miEstructura); i++) {
-    Serial.write(*tx++);
+    byte* tx = (byte*)&datos;
+    for (int i = 0; i < sizeof(miEstructura); i++) {
+      Serial.write(*tx++);
+    }
+  } else if (j == 2) {
+    vec1Byte = float2int(vec[0]);
+
+    byte* tx = (byte*)&vec1Byte;
+    for (int i = 0; i < sizeof(uint16_t); i++) {
+      Serial.write(*tx++);
+    }
+  } else if (j == 3) {
+    vec2Byte = float2int(vec[1]);
+
+    byte* tx = (byte*)&vec2Byte;
+    for (int i = 0; i < sizeof(uint16_t); i++) {
+      Serial.write(*tx++);
+    }
+
+    j = 0;
   }
 
-  delay(1);
+  delay(20);
 }
 
 void serialEvent() {
@@ -204,12 +234,13 @@ void serialEvent() {
   }
   Serial.flush();
   alfa = (float) fnum;
-  j = 0;
+  //j = 0;
   flag = 0;
 }
 
 uint16_t float2int(float valor) {
-  uint16_t salida = uint16_t(valor*100);
+  valor = valor*100 + 32768;
+  uint16_t salida = uint16_t(valor);
   return salida;
 }
 
@@ -246,33 +277,40 @@ ISR(TIMER2_COMPA_vect) {
   }
 
   // Serial . println (alfa_M1); // IMPRIMO LA ACELERACIÓN APLICADA PARA VER QUE LOS VALORES SON CORRECTOS
-  vel_M1=vel_M1-alfa_M1*T_PULS_2+giro_M1*0.05; //ACTUALIZO LA VELOCIDAD DEL MOTOR 1 CADA T_PULS_2 MS
+  vel_M1=vel_M1+alfa_M1*T_PULS_2+giro_M1*0.05; //ACTUALIZO LA VELOCIDAD DEL MOTOR 1 CADA T_PULS_2 MS
   vel_M2=vel_M2-alfa_M1*T_PULS_2+giro_M1*0.05; //ACTUALIZO LA VELOCIDAD 0DEL MOTOR 2 CADA T_PULS_2 MS
   vel_M1=constrain(vel_M1 ,-60,60); // SATURO LA VELOCIDAD ENTRE LOS LÍMITES ALCANZABLES
   vel_M2=constrain(vel_M2 ,-60,60); // SATURO LA VELOCIDAD ENTRE LOS LÍMITES ALCANZABLES
   comprueba_vel_1(vel_M1); //COMPRUEBO LA DIRECCIÓN DE GIRO DEL MOTOR 1 CON LA NUEVA VELOCIDAD
-  comprueba_vel_2(vel_M2); //COMPRUBEO LA DIRECCIÓN DE GIRO DEL MOTOR 2 CON LA NUEVA VELOCIDAD
+  comprueba_vel_2(-vel_M2); //COMPRUBEO LA DIRECCIÓN DE GIRO DEL MOTOR 2 CON LA NUEVA VELOCIDAD
   vel_M1-=giro_M1*0.05;
   vel_M2-=giro_M1*0.05;
-  vec [0]=(vel_M1-vel_M2)/2.0; //CÁLCULO EL VALOR DE LA VELOCIDAD MEDIA QUE LE ENVÍO A LA PI
   
+  vec[0]=(vel_M1-vel_M2)/2.0; //CÁLCULO EL VALOR DE LA VELOCIDAD MEDIA QUE LE ENVÍO A LA PI
+
+  // Leer las aceleraciones y velocidades angulares
   sensor.getAcceleration(&ax, &ay, &az);
   sensor.getRotation(&gx, &gy, &gz);
-  
+
+  gx = gx * (250.0/32768.0);
+  gy = gy * (250.0/32768.0);
+  gz = gz * (250.0/32768.0);
+
   dt = (millis() - tiempo_prev)/1000.0;
   tiempo_prev = millis();
 
   //Calcular los ángulos con acelerometro
-  float angulo_ax = atan(-ax/sqrt(pow(ax,2) + pow(az,2)))*(180.0/3.14);
-  
-  //Calcular angulo de rotación con giroscopio y filtro complemento  
-  angulo = 0.98*(anguloAnterior+(gx/131)*dt) + 0.02*angulo_ax;
-  
-  anguloAnterior = angulo;
+  float accel_ang_x=atan(ay/sqrt(pow(ax,2) + pow(az,2)))*(180.0/3.14);
+  float accel_ang_y=atan(-ax/sqrt(pow(ay,2) + pow(az,2)))*(180.0/3.14);
 
-  //Serial.print("Rotacion en X:  ");
-  //Serial.println(angulo);
+  //Calcular angulo de rotación con giroscopio y filtro complemento  
+  ang_x = TAU*(ang_x_prev+(gx/131)*dt) + (1-TAU)*accel_ang_x;
+  ang_y = TAU*(ang_y_prev+(gy/131)*dt) + (1-TAU)*accel_ang_y;
+
+  ang_x_prev=ang_x;
+  ang_y_prev=ang_y;
 }
+
 
 void comprueba_vel_1(float vel) {
   if (vel > 0) {
