@@ -11,14 +11,17 @@
 #include <wiringPi.h>
 #include <wiringSerial.h>
 #include <chrono>
+#include <math.h>
 
 using namespace std::chrono;
 
 //Para implementar el control LQRI se varía la cuarta componente del vector K a 0.3
-float K[] = {-344.05,-42.53,-7.69,0.3};
+float offset = 3.5;
+float K[] = {-344.0464,-42.5310,-7.6876,0.0};
 
 //FUNCIONES
 float calculo_lqr(float A, float B, float gir);
+float filtro(float accel, float gxy);
 
 //CAMBIO DE RADIANES A GRADOS
 #define DEG_TO_RAD 0.01745329252
@@ -32,18 +35,41 @@ float alpha;
 float aceleracion;
 int fd;
 
-int gx;
-float gxRad, ang;
+int gy;
+float gyRad, ang_x, ang_y, ang_z;
+float gy_escalado, ax_escalado, ay_escalado, az_escalado;
 
-int gxTr, angTr;
+#define A_OFF_X 0.0
+#define A_OFF_Y 0.0
+#define A_OFF_Z 0.0
 
-float gxAnterior;
-float angAnterior;
+#define ACCEL_SENS 835.1
+
+#define G_OFF_X -3.55
+#define G_OFF_Y	0.65
+#define G_OFF_Z 3.7
+
+#define GYRO_SENS 131.0
+
+float angulo = 0.0;
+float accel_ang_y;
+
+float giros_ang_y;
+float giros_ang_y_prev;
+float angAnterior = 0.0;
+
+float TAU = 0.98;
+
+float dt;
+long tiempo_prev;
+
+uint16_t gyByte;
 
 #pragma pack(push, 1)
 struct miEstructura {
-    uint16_t angByte = 0;
-    uint16_t gxByte = 0;
+    uint16_t angByte_x = 0;
+    uint16_t angByte_y = 0;
+    uint16_t angByte_z = 0;
 };
 #pragma pack(pop)
 
@@ -104,22 +130,32 @@ void Manejador(int signo, siginfo_t *info, void*context) {
             }    
             memcpy(&datos, buffer, sizeof(miEstructura));
             
-            gx = uint2int(datos.gxByte);
-            ang = uint2float(datos.angByte);
+            ang_x = uint2int(datos.angByte_x);
+            ang_y = uint2int(datos.angByte_y);
+            ang_z = uint2int(datos.angByte_z);
             
-            ang = ang*DEG_TO_RAD;
-            gxRad = (float)gx*DEG_TO_RAD;
-            
-            //std::cout << ang << "  " << omega << " " << "  " << gxRad << "  " << alpha << std::endl;
-            
-            //gxRad = gxRad*beta + gxAnterior*(1-beta);
-            //ang = ang*beta + angAnterior*(1-beta);   
-            
-            //gxAnterior = gxRad;
-            //angAnterior = ang;           
+            ax_escalado = round((ang_x - A_OFF_X)*1000.0 / ACCEL_SENS)/1000.0;
+            ay_escalado = round((ang_y - A_OFF_Y)*1000.0 / ACCEL_SENS)/1000.0;
+            az_escalado = round((ang_z - A_OFF_Z)*1000.0 / ACCEL_SENS)/1000.0;           
         break;
         
         case 2:
+			for (int i = 0; i < sizeof(uint16_t); i++) {
+                buffer[i] = serialGetchar(fd);
+            }
+            memcpy(&gyByte, buffer, sizeof(uint16_t));
+
+            gy = uint2int(gyByte);
+            gy_escalado = round((gy - G_OFF_Y)*1000.0 / GYRO_SENS)/1000.0;
+            
+            accel_ang_y = -atan2(ax_escalado, (sqrt((az_escalado*az_escalado) + (ay_escalado*ay_escalado))))*(180/PI);
+            giros_ang_y = filtro(accel_ang_y,gy_escalado);
+            
+            std::cout << phi/DEG_TO_RAD <<  "  " << dphi/DEG_TO_RAD << "  " << omega << "  " << alpha << std::endl;
+            std::cout << serialDataAvail(fd) << std::endl;
+        break;
+        
+        case 3:
 			for (int i = 0; i < sizeof(uint16_t); i++) {
                 buffer[i] = serialGetchar(fd);
             }
@@ -130,13 +166,18 @@ void Manejador(int signo, siginfo_t *info, void*context) {
             //std::cout << "omega: " << omega << std::endl;
         break;
         
-        case 3:
-            alpha = calculo_lqr(omega,omega_r,ang);
+        case 4:
+            alpha = calculo_lqr(omega, 0, giros_ang_y);
+            if (alpha < -100) {
+				alpha = -100;
+			} else if (alpha > 100) {
+				alpha = 100;
+			}
             //aceleracion += alpha;
             //std::cout << alpha << std::endl;
         break;
 
-        case 4:
+        case 5:
             for (int i = 0; i < 4; i++) {
                serialPutchar(fd, *((char *)&alpha + i));
             }
@@ -191,8 +232,17 @@ int main(void) {
 
 //función que calcula la acción de control
 float calculo_lqr(float A, float B, float gir) {
+	phi = (gir + offset)*DEG_TO_RAD;
+	dphi = gy_escalado*DEG_TO_RAD;
+	dtheta = A;
 	ivr = ivr + B - A;
-    u = ang*K[0] + gxRad*K[1] + (B+A)*K[2] + ivr*K[3];
+    u = phi*K[0] + dphi*K[1] + (B+A)*K[2] + ivr*K[3];
     return (u);
 }
 
+float filtro(float accel, float gxy) {
+	dtt = (double)(clock() - iniciall)/CLOCKS_PER_SEC;
+	giros_ang_y_prev = TAU*(giros_ang_y_prev + dtt*gxy) + (1-TAU)*accel;
+	iniciall = clock();
+	return(giros_ang_y_prev);
+}
